@@ -504,10 +504,12 @@ interface FolderNode {
   children: FolderNode[]
 }
 
+// Converts a flat sorted list of folder paths into a nested tree.
+// Relies on alphabetical sort guaranteeing parent before child:
+//   "A/B" always sorts after "A" since "/" (U+002F) < any letter.
 function buildFolderTree(folders: string[]): FolderNode[] {
   const map = new Map<string, FolderNode>()
   const roots: FolderNode[] = []
-  // localeCompare ensures parent paths sort before their children across all locales
   const sorted = [...folders].sort((a, b) => a.localeCompare(b))
   for (const path of sorted) {
     const parts = path.split("/").filter(Boolean)
@@ -519,10 +521,75 @@ function buildFolderTree(folders: string[]): FolderNode[] {
     } else {
       const parent = map.get(parts.slice(0, -1).join("/"))
       if (parent) parent.children.push(node)
-      else roots.push(node)
+      else roots.push(node) // orphan: intermediate path missing from API response
     }
   }
   return roots
+}
+
+// Proper React component so React can reconcile expand state correctly.
+// Using a function (not a component) caused React to miss re-renders on expand toggle.
+function TreeNode({
+  node, depth, value, expanded, onSelect, onToggle
+}: {
+  node: FolderNode
+  depth: number
+  value: string
+  expanded: Set<string>
+  onSelect: (path: string) => void
+  onToggle: (path: string) => void
+}) {
+  const isExp = expanded.has(node.path)
+  const isSel = value === node.path
+  const hasKids = node.children.length > 0
+  return (
+    <div>
+      <div
+        onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
+        style={{
+          display: "flex", alignItems: "center",
+          paddingLeft: 6 + depth * 16, paddingRight: 10,
+          paddingTop: 5, paddingBottom: 5,
+          background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
+          borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
+          userSelect: "none"
+        }}>
+        {/* Expand/collapse — 20×20 zone, easier to hit than 14×14 */}
+        <span
+          onClick={() => { if (hasKids) onToggle(node.path) }}
+          style={{
+            width: 20, height: 20,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, cursor: hasKids ? "pointer" : "default", color: C.muted
+          }}>
+          {hasKids && <Ico name={isExp ? "chevron-down" : "chevron-right"} size={12} />}
+        </span>
+        {/* Folder icon */}
+        <span style={{ display: "inline-flex", color: isSel ? C.accent : C.muted, marginRight: 6, flexShrink: 0 }}>
+          <Ico name="folder" size={13} />
+        </span>
+        {/* Name — click selects this folder */}
+        <span
+          onClick={() => onSelect(node.path)}
+          style={{ flex: 1, fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>
+          {node.name}
+        </span>
+        {isSel && <span style={{ flexShrink: 0, color: C.accent, display: "inline-flex" }}><Ico name="check" size={12} /></span>}
+      </div>
+      {isExp && hasKids && node.children.map(child => (
+        <TreeNode
+          key={child.path}
+          node={child}
+          depth={depth + 1}
+          value={value}
+          expanded={expanded}
+          onSelect={onSelect}
+          onToggle={onToggle}
+        />
+      ))}
+    </div>
+  )
 }
 
 function FolderTreePicker({
@@ -545,7 +612,7 @@ function FolderTreePicker({
 
   const tree = useMemo(() => buildFolderTree(folders), [folders])
 
-  // Expand ancestors of current value so selection is visible in tree
+  // Auto-expand ancestors when a saved value is loaded
   useEffect(() => {
     if (!value) return
     const parts = value.split("/").filter(Boolean)
@@ -557,7 +624,6 @@ function FolderTreePicker({
     })
   }, [value])
 
-  // Focus search on open; clear on close
   useEffect(() => {
     if (open) setTimeout(() => searchRef.current?.focus(), 50)
     else setSearch("")
@@ -580,50 +646,9 @@ function FolderTreePicker({
     })
   }
 
-  function renderNode(node: FolderNode, depth: number) {
-    const isExp = expanded.has(node.path)
-    const isSel = value === node.path
-    const hasKids = node.children.length > 0
-    return (
-      <div key={node.path}>
-        <div
-          onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
-          style={{
-            display: "flex", alignItems: "center",
-            padding: `5px 10px 5px ${8 + depth * 14}px`,
-            userSelect: "none",
-            background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
-            borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
-            transition: "background 0.1s"
-          }}>
-          {/* Expand/collapse zone: chevron + folder icon — 28px wide, easier to click */}
-          <div
-            onClick={hasKids ? (e) => { e.stopPropagation(); toggleExpand(node.path) } : undefined}
-            style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0, cursor: hasKids ? "pointer" : "default", paddingRight: 6 }}>
-            <span style={{ width: 12, height: 12, display: "flex", alignItems: "center", justifyContent: "center", color: C.muted, visibility: hasKids ? "visible" : "hidden" }}>
-              <Ico name={isExp ? "chevron-down" : "chevron-right"} size={11} />
-            </span>
-            <span style={{ color: isSel ? C.accent : C.muted, display: "flex" }}>
-              <Ico name="folder" size={13} />
-            </span>
-          </div>
-          {/* Folder name — clicking selects */}
-          <span
-            onClick={() => selectFolder(node.path)}
-            style={{ fontSize: 12, color: isSel ? C.text : C.sub, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>
-            {node.name}
-          </span>
-          {isSel && <span style={{ flexShrink: 0, color: C.accent, display: "flex", marginLeft: 4 }}><Ico name="check" size={12} /></span>}
-        </div>
-        {isExp && hasKids && node.children.map(c => renderNode(c, depth + 1))}
-      </div>
-    )
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {/* Manual input + toggle */}
+      {/* Manual input + open/close button */}
       <div style={{ display: "flex", gap: 6 }}>
         <input
           type="text"
@@ -634,7 +659,7 @@ function FolderTreePicker({
         />
         <button
           onClick={() => setOpen(o => !o)}
-          title={open ? "Close folder browser" : "Browse folders"}
+          title={open ? "Fechar navegador de pastas" : "Navegar pastas"}
           style={{
             width: 34, height: 34, borderRadius: 8, flexShrink: 0,
             background: open ? "rgba(124,58,237,0.2)" : C.input,
@@ -647,17 +672,17 @@ function FolderTreePicker({
         </button>
       </div>
 
-      {/* Tree panel (inline, toggleable) */}
+      {/* Tree panel */}
       {open && (
-        <div style={{ background: C.input, border: `1px solid ${C.border}`, borderRadius: 10, display: "flex", flexDirection: "column", maxHeight: 260 }}>
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, background: C.input }}>
           {/* Search + Refresh header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `1px solid ${C.divider}`, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `1px solid ${C.divider}` }}>
             <input
               ref={searchRef}
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search folders…"
+              placeholder="Buscar pastas…"
               style={{ flex: 1, background: "transparent", fontSize: 12, color: C.text }}
             />
             {search && (
@@ -668,24 +693,26 @@ function FolderTreePicker({
             <button
               onClick={onRefresh}
               disabled={loading}
-              title="Refresh folders from Obsidian"
-              style={{ color: loading ? C.muted : C.sub, display: "flex", opacity: loading ? 0.5 : 1, transition: "opacity 0.15s" }}>
+              title="Atualizar lista de pastas"
+              style={{ color: loading ? C.muted : C.sub, display: "flex", opacity: loading ? 0.5 : 1 }}>
               <Ico name="refresh" size={13} />
             </button>
           </div>
 
-          {/* Content area — flex: 1 + minHeight: 0 é o padrão correto para scroll dentro de flex */}
-          <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+          {/* Scrollable content — maxHeight directly on this div, no flex/overflow:hidden above */}
+          <div style={{ maxHeight: 240, overflowY: "auto" }}>
             {loading && folders.length === 0 ? (
-              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>Loading folders…</div>
+              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+                Carregando pastas…
+              </div>
             ) : folders.length === 0 ? (
               <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-                No folders found. Is Obsidian open?
+                Nenhuma pasta encontrada. O Obsidian está aberto?
               </div>
             ) : filtered !== null ? (
               filtered.length === 0 ? (
                 <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-                  No match for "{search}"
+                  Nenhuma pasta encontrada para "{search}"
                 </div>
               ) : (
                 filtered.map(path => {
@@ -701,23 +728,33 @@ function FolderTreePicker({
                         display: "flex", alignItems: "center", gap: 8,
                         padding: "6px 12px", cursor: "pointer", userSelect: "none",
                         background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
-                        borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
-                        transition: "background 0.1s"
+                        borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent"
                       }}>
-                      <span style={{ color: isSel ? C.accent : C.muted, display: "flex", flexShrink: 0 }}>
+                      <span style={{ color: isSel ? C.accent : C.muted, display: "inline-flex", flexShrink: 0 }}>
                         <Ico name="folder" size={13} />
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
                         <div style={{ fontSize: 10, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</div>
                       </div>
-                      {isSel && <span style={{ color: C.accent, display: "flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
+                      {isSel && <span style={{ color: C.accent, display: "inline-flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
                     </div>
                   )
                 })
               )
             ) : (
-              tree.map(node => renderNode(node, 0))
+              // Tree mode: use TreeNode component so React reconciles expand state correctly
+              tree.map(node => (
+                <TreeNode
+                  key={node.path}
+                  node={node}
+                  depth={0}
+                  value={value}
+                  expanded={expanded}
+                  onSelect={selectFolder}
+                  onToggle={toggleExpand}
+                />
+              ))
             )}
           </div>
         </div>
