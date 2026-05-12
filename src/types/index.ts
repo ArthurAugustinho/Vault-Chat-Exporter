@@ -5,6 +5,8 @@ export type Role = "user" | "assistant" | "system"
 export interface Message {
   role: Role
   content: string
+  /** Visible chain-of-thought summary exposed by the platform UI, if any. */
+  thinking?: string
 }
 
 export interface Conversation {
