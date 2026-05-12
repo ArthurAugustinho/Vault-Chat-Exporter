@@ -14,6 +14,7 @@ import {
   testConnection
 } from "~/lib/obsidianApi"
 import {
+  addKnownFolder,
   isCacheStale,
   loadSettings,
   loadVaultCache,
@@ -491,13 +492,15 @@ function FolderDropdown({
   onChange,
   folders,
   loading,
-  onRefresh
+  onRefresh,
+  onSaveKnown
 }: {
   value: string
   onChange: (v: string) => void
   folders: string[]
   loading: boolean
   onRefresh: () => void
+  onSaveKnown: (path: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -507,6 +510,12 @@ function FolderDropdown({
     if (!q) return folders
     return folders.filter((f) => f.toLowerCase().includes(q))
   }, [folders, value])
+
+  // Path the user typed that isn't in the known list yet — candidate to pin
+  const saveablePath = (() => {
+    const t = value.trim().replace(/\/$/, "")
+    return t && !folders.includes(t) ? t : null
+  })()
 
   useEffect(() => {
     if (!open) return
@@ -549,44 +558,72 @@ function FolderDropdown({
       </div>
 
       {open && (
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, background: C.input, maxHeight: 240, overflowY: "auto" }}>
-          {loading && folders.length === 0 ? (
-            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-              Carregando pastas…
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, background: C.input }}>
+          {/* Scrollable folder list */}
+          <div style={{ maxHeight: 210, overflowY: "auto" }}>
+            {loading && folders.length === 0 ? (
+              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+                Carregando pastas…
+              </div>
+            ) : folders.length === 0 ? (
+              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+                Nenhuma pasta encontrada. O Obsidian está aberto?
+              </div>
+            ) : filtered.length === 0 ? (
+              <div style={{ padding: "10px 12px", fontSize: 12, color: C.muted }}>
+                Pasta não encontrada na lista.
+              </div>
+            ) : (
+              filtered.map((path) => {
+                const isSel = value === path
+                return (
+                  <div
+                    key={path}
+                    onMouseDown={(e) => { e.preventDefault(); selectFolder(path) }}
+                    onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 12px", cursor: "pointer", userSelect: "none",
+                      background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
+                      borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent"
+                    }}>
+                    <span style={{ color: isSel ? C.accent : C.muted, display: "inline-flex", flexShrink: 0 }}>
+                      <Ico name="folder" size={13} />
+                    </span>
+                    <span style={{ flex: 1, fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {path}
+                    </span>
+                    {isSel && <span style={{ color: C.accent, display: "inline-flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {/* Pin option — always visible at bottom when path is new */}
+          {saveablePath && (
+            <div
+              onMouseDown={(e) => {
+                e.preventDefault()
+                onSaveKnown(saveablePath)
+                setOpen(false)
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(124,58,237,0.08)" }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent" }}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 12px", cursor: "pointer", userSelect: "none",
+                borderTop: `1px solid ${C.divider}`,
+                background: "transparent", transition: "background 0.12s"
+              }}>
+              <span style={{ color: C.accent, display: "inline-flex", flexShrink: 0 }}>
+                <Ico name="folder" size={13} />
+              </span>
+              <span style={{ fontSize: 12, color: C.sub }}>
+                Salvar <span style={{ color: C.text, fontWeight: 500 }}>"{saveablePath}"</span> nas pastas conhecidas
+              </span>
             </div>
-          ) : folders.length === 0 ? (
-            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-              Nenhuma pasta encontrada. O Obsidian está aberto?
-            </div>
-          ) : filtered.length === 0 ? (
-            <div style={{ padding: "10px 12px", fontSize: 12, color: C.muted }}>
-              Pasta não encontrada — o valor digitado será usado diretamente.
-            </div>
-          ) : (
-            filtered.map((path) => {
-              const isSel = value === path
-              return (
-                <div
-                  key={path}
-                  onMouseDown={(e) => { e.preventDefault(); selectFolder(path) }}
-                  onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "7px 12px", cursor: "pointer", userSelect: "none",
-                    background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
-                    borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent"
-                  }}>
-                  <span style={{ color: isSel ? C.accent : C.muted, display: "inline-flex", flexShrink: 0 }}>
-                    <Ico name="folder" size={13} />
-                  </span>
-                  <span style={{ flex: 1, fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {path}
-                  </span>
-                  {isSel && <span style={{ color: C.accent, display: "inline-flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
-                </div>
-              )
-            })
           )}
         </div>
       )}
@@ -803,6 +840,7 @@ function Popup() {
   const [mocPath, setMocPath] = useState("")
 
   const [folders, setFolders] = useState<string[]>([])
+  const [knownFolders, setKnownFolders] = useState<string[]>([])
   const [knownTags, setKnownTags] = useState<string[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [vaultLoading, setVaultLoading] = useState(false)
@@ -837,6 +875,12 @@ function Popup() {
     setMarkdown(conversationToMarkdown(filtered, { title: title || conversation.title, tags: tagList, templateFields: tpl?.fields }))
   }, [conversation, title, tags, selectedIds, template])
 
+  // Merge API folders + user-saved known folders, deduplicated and sorted
+  const allFolders = useMemo(
+    () => [...new Set([...folders, ...knownFolders])].sort((a, b) => a.localeCompare(b)),
+    [folders, knownFolders]
+  )
+
   async function loadVaultData(s: AppSettings, forceRefresh = false) {
     const cache = await loadVaultCache()
     if (cache.folders.length > 0) { setFolders(cache.folders); setKnownTags(cache.tags); setNotes(cache.notes); setCacheTs(cache.ts) }
@@ -868,6 +912,7 @@ function Popup() {
     setSettings(s); setApiUrl(s.obsidianBaseUrl); setApiToken(s.obsidianToken)
     setFolder(s.lastFolder); setTags(s.lastTags); setTemplate(s.lastTemplate)
     setUseMoc(s.useMoc); setMocPath(s.lastMocPath)
+    setKnownFolders(s.knownFolders ?? [])
     void loadVaultData(s)
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -894,6 +939,10 @@ function Popup() {
       await sendToObsidian({ baseUrl: settings.obsidianBaseUrl, token: settings.obsidianToken, path, content: markdown, append })
       await saveLastUsed(folder, tags)
       await saveSettings({ useMoc, lastMocPath: mocPath.trim(), lastTemplate: template })
+      // Persist the folder so it appears in the dropdown even if the vault is empty
+      const trimmedFolder = folder.trim()
+      await addKnownFolder(trimmedFolder)
+      setKnownFolders(prev => [...new Set([...prev, trimmedFolder])].sort((a, b) => a.localeCompare(b)))
       if (useMoc && mocPath.trim()) {
         try {
           await appendLinkToNote({ baseUrl: settings.obsidianBaseUrl, token: settings.obsidianToken, indexPath: mocPath.trim(), notePath: path, noteTitle })
@@ -914,13 +963,19 @@ function Popup() {
     const token = apiToken.trim()
     await saveSettings({ obsidianBaseUrl: url, obsidianToken: token })
     const updated: AppSettings = {
-      ...(settings ?? { obsidianBaseUrl: url, obsidianToken: token, lastFolder: folder, lastTags: tags, lastMocPath: mocPath, useMoc, lastTemplate: template }),
+      ...(settings ?? { obsidianBaseUrl: url, obsidianToken: token, lastFolder: folder, lastTags: tags, lastMocPath: mocPath, useMoc, lastTemplate: template, knownFolders: [] }),
       obsidianBaseUrl: url, obsidianToken: token
     }
     setSettings(updated); setSettingsSaved(true)
     if (savedTimer.current) clearTimeout(savedTimer.current)
     savedTimer.current = setTimeout(() => setSettingsSaved(false), 2500)
     void loadVaultData(updated, true)
+  }
+
+  async function handleSaveKnownFolder(path: string) {
+    await addKnownFolder(path)
+    setKnownFolders(prev => [...new Set([...prev, path])].sort((a, b) => a.localeCompare(b)))
+    setFolder(path)
   }
 
   async function handleTestConnection() {
@@ -1056,9 +1111,10 @@ function Popup() {
                   <FolderDropdown
                     value={folder}
                     onChange={setFolder}
-                    folders={folders}
+                    folders={allFolders}
                     loading={vaultLoading}
                     onRefresh={() => settings && void loadVaultData(settings, true)}
+                    onSaveKnown={handleSaveKnownFolder}
                   />
                 </FieldGroup>
                 <FieldGroup label="Template">

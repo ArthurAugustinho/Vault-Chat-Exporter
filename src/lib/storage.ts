@@ -11,7 +11,8 @@ const DEFAULTS: AppSettings = {
   lastTags: "ai",
   lastMocPath: "",
   useMoc: false,
-  lastTemplate: ""
+  lastTemplate: "",
+  knownFolders: []
 }
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -31,6 +32,21 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
 
 export async function saveLastUsed(folder: string, tags: string): Promise<void> {
   await saveSettings({ lastFolder: folder, lastTags: tags })
+}
+
+/**
+ * Adds a folder path to the persisted known-folders list (deduped, sorted).
+ * Used to remember empty folders or manually typed paths across sessions.
+ */
+export async function addKnownFolder(folder: string): Promise<void> {
+  const trimmed = folder.trim()
+  if (!trimmed) return
+  const s = await loadSettings()
+  const existing = s.knownFolders ?? []
+  if (existing.includes(trimmed)) return
+  await saveSettings({
+    knownFolders: [...existing, trimmed].sort((a, b) => a.localeCompare(b))
+  })
 }
 
 // ─── Vault Metadata Cache ─────────────────────────────────────────────────────

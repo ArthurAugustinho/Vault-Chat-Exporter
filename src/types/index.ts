@@ -22,6 +22,8 @@ export interface AppSettings {
   lastMocPath: string
   useMoc: boolean
   lastTemplate: string
+  /** User-curated folder paths that persist independently of the vault API cache. */
+  knownFolders: string[]
 }
 
 export interface MarkdownOptions {
