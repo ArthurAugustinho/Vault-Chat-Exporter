@@ -7,7 +7,8 @@
       "Bash(Remove-Item src\\\\newtab.tsx)",
       "Bash(Remove-Item src\\\\options.tsx)",
       "Bash(python3 -c \"import json,sys; m=json.load\\(sys.stdin\\); print\\('chrome_url_overrides:', m.get\\('chrome_url_overrides', 'GONE'\\)\\); print\\('options_ui:', m.get\\('options_ui', 'GONE'\\)\\)\")",
-      "PowerShell($m = Get-Content \"c:\\\\My-Projects\\\\Vault-Chat-Exporter\\\\build\\\\chrome-mv3-prod\\\\manifest.json\" | ConvertFrom-Json; \"chrome_url_overrides: $\\(if \\($m.chrome_url_overrides\\) { $m.chrome_url_overrides } else { 'GONE' }\\)\"; \"options_ui: $\\(if \\($m.options_ui\\) { $m.options_ui } else { 'GONE' }\\)\")"
+      "PowerShell($m = Get-Content \"c:\\\\My-Projects\\\\Vault-Chat-Exporter\\\\build\\\\chrome-mv3-prod\\\\manifest.json\" | ConvertFrom-Json; \"chrome_url_overrides: $\\(if \\($m.chrome_url_overrides\\) { $m.chrome_url_overrides } else { 'GONE' }\\)\"; \"options_ui: $\\(if \\($m.options_ui\\) { $m.options_ui } else { 'GONE' }\\)\")",
+      "Bash(npm run *)"
     ]
   }
 }
