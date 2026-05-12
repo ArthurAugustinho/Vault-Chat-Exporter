@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import "~/style.css"
 
-import type { AppSettings, Conversation, ExtractRequest, ExtractResponse, Message } from "~/types"
+import type { AppSettings, Conversation, ExtractRequest, ExtractResponse, Message, RenameRequest, RenameResponse } from "~/types"
 import { conversationToMarkdown } from "~/lib/markdown"
 import { TEMPLATES } from "~/lib/templates"
 import {
@@ -194,6 +194,12 @@ function Ico({
         <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
           <path d="M13 3.5A6.5 6.5 0 108 14.5" />
           <path d="M13.5 1v3h-3" />
+        </svg>
+      )
+    case "pencil":
+      return (
+        <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
+          <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" />
         </svg>
       )
     default:
@@ -838,6 +844,7 @@ function Popup() {
   const [template, setTemplate] = useState("")
   const [useMoc, setUseMoc] = useState(false)
   const [mocPath, setMocPath] = useState("")
+  const [renameOnSync, setRenameOnSync] = useState(false)
 
   const [folders, setFolders] = useState<string[]>([])
   const [knownFolders, setKnownFolders] = useState<string[]>([])
@@ -913,6 +920,7 @@ function Popup() {
     setFolder(s.lastFolder); setTags(s.lastTags); setTemplate(s.lastTemplate)
     setUseMoc(s.useMoc); setMocPath(s.lastMocPath)
     setKnownFolders(s.knownFolders ?? [])
+    setRenameOnSync(s.renameOnSync ?? false)
     void loadVaultData(s)
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -927,18 +935,39 @@ function Popup() {
     }
   }
 
+  async function sendRenameMessage(newName: string): Promise<RenameResponse> {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id) return { ok: false, error: "No active tab found." }
+      const msg: RenameRequest = { type: "RENAME_PLATFORM_CHAT", newName }
+      return await Promise.race([
+        chrome.tabs.sendMessage(tab.id, msg) as Promise<RenameResponse>,
+        new Promise<RenameResponse>((r) => setTimeout(() => r({ ok: false, error: "Rename timed out." }), 5000))
+      ])
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   async function handleSync() {
     if (!settings || !conversation) return
     if (!settings.obsidianToken) { prevView.current = view; setView("settings"); return }
     if (!folder.trim()) { setSyncStatus("error"); setSyncMsg("Informe uma pasta de destino antes de salvar."); return }
     if (selectedIds.size === 0) { setSyncStatus("error"); setSyncMsg("No messages selected."); return }
     setSyncStatus("syncing"); setSyncMsg("")
+
+    let renameWarning = ""
+    if (renameOnSync) {
+      const r = await sendRenameMessage(title || conversation.title)
+      if (!r.ok) renameWarning = `Rename failed: ${r.error ?? "Unknown"}.`
+    }
+
     try {
       const path = buildVaultPath(folder, title || conversation.title)
       const noteTitle = title || conversation.title
       await sendToObsidian({ baseUrl: settings.obsidianBaseUrl, token: settings.obsidianToken, path, content: markdown, append })
       await saveLastUsed(folder, tags)
-      await saveSettings({ useMoc, lastMocPath: mocPath.trim(), lastTemplate: template })
+      await saveSettings({ useMoc, lastMocPath: mocPath.trim(), lastTemplate: template, renameOnSync })
       // Persist the folder so it appears in the dropdown even if the vault is empty
       const trimmedFolder = folder.trim()
       await addKnownFolder(trimmedFolder)
@@ -946,12 +975,15 @@ function Popup() {
       if (useMoc && mocPath.trim()) {
         try {
           await appendLinkToNote({ baseUrl: settings.obsidianBaseUrl, token: settings.obsidianToken, indexPath: mocPath.trim(), notePath: path, noteTitle })
-          setSyncStatus("success"); setSyncMsg(`Saved → ${path} · Index updated`)
+          setSyncStatus(renameWarning ? "partial" : "success")
+          setSyncMsg(`${renameWarning ? renameWarning + " " : ""}Saved → ${path} · Index updated`)
         } catch (ie) {
-          setSyncStatus("partial"); setSyncMsg(`Saved → ${path}. Index failed: ${ie instanceof Error ? ie.message : "Unknown error"}`)
+          setSyncStatus("partial")
+          setSyncMsg(`${renameWarning ? renameWarning + " " : ""}Saved → ${path}. Index failed: ${ie instanceof Error ? ie.message : "Unknown error"}`)
         }
       } else {
-        setSyncStatus("success"); setSyncMsg(`Saved → ${path}`)
+        setSyncStatus(renameWarning ? "partial" : "success")
+        setSyncMsg(`${renameWarning ? renameWarning + " " : ""}Saved → ${path}`)
       }
     } catch (e) {
       setSyncStatus("error"); setSyncMsg(e instanceof Error ? e.message : "Unknown error.")
@@ -963,7 +995,7 @@ function Popup() {
     const token = apiToken.trim()
     await saveSettings({ obsidianBaseUrl: url, obsidianToken: token })
     const updated: AppSettings = {
-      ...(settings ?? { obsidianBaseUrl: url, obsidianToken: token, lastFolder: folder, lastTags: tags, lastMocPath: mocPath, useMoc, lastTemplate: template, knownFolders: [] }),
+      ...(settings ?? { obsidianBaseUrl: url, obsidianToken: token, lastFolder: folder, lastTags: tags, lastMocPath: mocPath, useMoc, lastTemplate: template, knownFolders: [], renameOnSync: false }),
       obsidianBaseUrl: url, obsidianToken: token
     }
     setSettings(updated); setSettingsSaved(true)
@@ -1167,6 +1199,16 @@ function Popup() {
                       )}
                     </div>
                     <Toggle checked={useMoc} onChange={setUseMoc} />
+                  </div>
+                </Card>
+                <Card>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <IconBadge icon="pencil" />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Rename before sync</div>
+                      <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>Rename the platform chat to match the title above before exporting</div>
+                    </div>
+                    <Toggle checked={renameOnSync} onChange={setRenameOnSync} />
                   </div>
                 </Card>
               </div>

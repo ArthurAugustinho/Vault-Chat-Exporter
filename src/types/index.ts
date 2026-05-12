@@ -24,6 +24,18 @@ export interface AppSettings {
   lastTemplate: string
   /** User-curated folder paths that persist independently of the vault API cache. */
   knownFolders: string[]
+  /** When true, attempt to rename the platform chat before exporting. */
+  renameOnSync: boolean
+}
+
+export interface RenameRequest {
+  type: "RENAME_PLATFORM_CHAT"
+  newName: string
+}
+
+export interface RenameResponse {
+  ok: boolean
+  error?: string
 }
 
 export interface MarkdownOptions {

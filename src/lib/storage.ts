@@ -12,7 +12,8 @@ const DEFAULTS: AppSettings = {
   lastMocPath: "",
   useMoc: false,
   lastTemplate: "",
-  knownFolders: []
+  knownFolders: [],
+  renameOnSync: false
 }
 
 export async function loadSettings(): Promise<AppSettings> {

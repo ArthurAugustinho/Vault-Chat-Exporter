@@ -1,9 +1,10 @@
 import type { PlasmoCSConfig } from "plasmo"
-import type { ExtractRequest, ExtractResponse } from "~/types"
+import type { ExtractRequest, ExtractResponse, RenameRequest, RenameResponse } from "~/types"
 import { extractChatGPT, matchesChatGPT } from "~/lib/platforms/chatgpt"
 import { extractClaude, matchesClaude } from "~/lib/platforms/claude"
 import { extractGemini, matchesGemini } from "~/lib/platforms/gemini"
 import { extractPerplexity, matchesPerplexity } from "~/lib/platforms/perplexity"
+import { renamePlatformChat } from "~/lib/rename"
 
 export const config: PlasmoCSConfig = {
   matches: [
@@ -41,19 +42,38 @@ function detectAndExtract(): ExtractResponse {
 }
 
 chrome.runtime.onMessage.addListener(
-  (message: ExtractRequest, _sender, sendResponse) => {
-    if (message.type !== "EXTRACT_CONVERSATION") return
+  (message: ExtractRequest | RenameRequest, _sender, sendResponse) => {
+    if (message.type === "EXTRACT_CONVERSATION") {
+      const result = detectAndExtract()
 
-    const result = detectAndExtract()
+      // If no messages were found, report it as an error rather than empty data
+      if (result.conversation && result.conversation.messages.length === 0) {
+        result.conversation = null
+        result.error =
+          "No messages found. Make sure the conversation has loaded fully."
+      }
 
-    // If no messages were found, report it as an error rather than empty data
-    if (result.conversation && result.conversation.messages.length === 0) {
-      result.conversation = null
-      result.error =
-        "No messages found. Make sure the conversation has loaded fully."
+      sendResponse(result as ExtractResponse)
+      return true
     }
 
-    sendResponse(result)
-    return true
+    if (message.type === "RENAME_PLATFORM_CHAT") {
+      const url = location.href
+      let platform = "unknown"
+      if (matchesChatGPT(url)) platform = "chatgpt"
+      else if (matchesClaude(url)) platform = "claude"
+      else if (matchesGemini(url)) platform = "gemini"
+      else if (matchesPerplexity(url)) platform = "perplexity"
+
+      renamePlatformChat(platform, message.newName)
+        .then(() => sendResponse({ ok: true } as RenameResponse))
+        .catch((err) =>
+          sendResponse({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err)
+          } as RenameResponse)
+        )
+      return true // keep channel open for async response
+    }
   }
 )
