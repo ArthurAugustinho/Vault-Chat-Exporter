@@ -198,6 +198,50 @@ export function buildVaultPath(folder: string, title: string): string {
   return safeFolder ? `${safeFolder}/${fileName}` : fileName
 }
 
+// ─── Connection Test ──────────────────────────────────────────────────────────
+
+export type ConnectionStatus =
+  | { ok: true; detail: string }
+  | { ok: false; reason: string }
+
+/**
+ * Validates URL/token and does a minimal GET /vault/ to confirm the
+ * Obsidian Local REST API is reachable and the token is accepted.
+ * Never logs or exposes the token.
+ */
+export async function testConnection(opts: {
+  baseUrl: string
+  token: string
+}): Promise<ConnectionStatus> {
+  const { baseUrl, token } = opts
+
+  if (!baseUrl.trim()) return { ok: false, reason: "API URL is empty." }
+  if (!token.trim()) return { ok: false, reason: "API Token is empty." }
+
+  let parsed: URL
+  try {
+    parsed = new URL(baseUrl.trim())
+  } catch {
+    return { ok: false, reason: "Invalid URL format. Example: http://127.0.0.1:27123" }
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return { ok: false, reason: "URL must use http:// or https://" }
+  }
+
+  try {
+    const res = await fetch(vaultUrl(baseUrl.trim(), "vault/"), {
+      headers: { Authorization: `Bearer ${token.trim()}` }
+    })
+    if (res.status === 401) return { ok: false, reason: "Invalid API token. Check Obsidian → Settings → Local REST API." }
+    if (res.status === 403) return { ok: false, reason: "Access forbidden. Verify your API token." }
+    if (!res.ok) return { ok: false, reason: `API responded with status ${res.status}.` }
+    return { ok: true, detail: "Connected — vault is accessible." }
+  } catch {
+    return { ok: false, reason: "Cannot reach Obsidian. Is Obsidian open and Local REST API enabled?" }
+  }
+}
+
 // ─── Note Write ───────────────────────────────────────────────────────────────
 
 export async function sendToObsidian(opts: ObsidianSendOptions): Promise<void> {

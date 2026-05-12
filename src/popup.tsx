@@ -10,7 +10,8 @@ import {
   listFolders,
   listNotes,
   listTags,
-  sendToObsidian
+  sendToObsidian,
+  testConnection
 } from "~/lib/obsidianApi"
 import {
   isCacheStale,
@@ -25,6 +26,7 @@ import {
 
 type View = "loading" | "no-match" | "preview" | "settings"
 type SyncStatus = "idle" | "syncing" | "success" | "partial" | "error"
+type ConnStatus = "idle" | "testing" | "ok" | "error"
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -749,6 +751,8 @@ function Popup() {
   const [apiUrl, setApiUrl] = useState("")
   const [apiToken, setApiToken] = useState("")
   const [settingsSaved, setSettingsSaved] = useState(false)
+  const [connStatus, setConnStatus] = useState<ConnStatus>("idle")
+  const [connMsg, setConnMsg] = useState("")
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevView = useRef<View>("loading")
 
@@ -761,6 +765,8 @@ function Popup() {
     if (!conversation) return
     setSelectedIds(new Set(conversation.messages.map((_, i) => i)))
   }, [conversation])
+
+  useEffect(() => { setConnStatus("idle"); setConnMsg("") }, [apiUrl, apiToken])
 
   useEffect(() => {
     if (!conversation) return
@@ -853,6 +859,19 @@ function Popup() {
     if (savedTimer.current) clearTimeout(savedTimer.current)
     savedTimer.current = setTimeout(() => setSettingsSaved(false), 2500)
     void loadVaultData(updated, true)
+  }
+
+  async function handleTestConnection() {
+    setConnStatus("testing")
+    setConnMsg("")
+    const result = await testConnection({ baseUrl: apiUrl.trim(), token: apiToken.trim() })
+    if ("reason" in result) {
+      setConnStatus("error")
+      setConnMsg(result.reason)
+    } else {
+      setConnStatus("ok")
+      setConnMsg(result.detail)
+    }
   }
 
   function toggleSettings() {
@@ -1076,6 +1095,39 @@ function Popup() {
                 <FieldGroup label="API Token" hint="Obsidian → Settings → Local REST API → API Key">
                   <TextInput type="password" value={apiToken} onChange={setApiToken} placeholder="Paste your API key here" />
                 </FieldGroup>
+                <div style={{ borderTop: `1px solid ${C.divider}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button
+                    onClick={handleTestConnection}
+                    disabled={connStatus === "testing"}
+                    onMouseEnter={(e) => { if (connStatus !== "testing") { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = C.text } }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.sub }}
+                    style={{
+                      alignSelf: "flex-start",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      padding: "6px 14px",
+                      borderRadius: 8,
+                      color: connStatus === "testing" ? C.muted : C.sub,
+                      background: "transparent",
+                      border: `1px solid ${C.border}`,
+                      opacity: connStatus === "testing" ? 0.6 : 1,
+                      transition: "background 0.15s, color 0.15s"
+                    }}>
+                    {connStatus === "testing" ? "Testing…" : "Test Connection"}
+                  </button>
+                  {connStatus === "ok" && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6EE7B7" }}>
+                      <Ico name="check" size={13} />
+                      <span>{connMsg}</span>
+                    </div>
+                  )}
+                  {connStatus === "error" && (
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: "#FCA5A5", lineHeight: 1.5 }}>
+                      <span style={{ flexShrink: 0, marginTop: 1 }}><Ico name="x-circle" size={13} /></span>
+                      <span>{connMsg}</span>
+                    </div>
+                  )}
+                </div>
               </Card>
             </div>
 
