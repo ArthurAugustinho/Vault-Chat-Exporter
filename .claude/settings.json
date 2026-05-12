@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"function seg\\(s\\){return s.replace\\(/\\\\.\\\\./g,''\\).replace\\(/[<>:|?*]/g,''\\).replace\\(/^\\\\./,''\\).trim\\(\\).slice\\(0,200\\)} function p\\(raw\\){return raw.split\\('/'\\).map\\(seg\\).filter\\(Boolean\\).join\\('/'\\)} console.log\\(p\\('../../../etc/passwd'\\)\\); console.log\\(p\\('AI Chats/test'\\)\\); console.log\\(p\\('<script>x</script>'\\)\\); console.log\\(p\\('normal/path'\\)\\)\")",
+      "Bash(node -e \"const m=require\\('./build/chrome-mv3-prod/manifest.json'\\); console.log\\(JSON.stringify\\(m, null, 2\\)\\)\" \"c:\\\\My-Projects\\\\Vault-Chat-Exporter\")",
+      "Bash(Remove-Item -Recurse -Force \"c:\\\\My-Projects\\\\Vault-Chat-Exporter\\\\vault-chat-exporter\")",
+      "Bash(Remove-Item src\\\\newtab.tsx)",
+      "Bash(Remove-Item src\\\\options.tsx)",
+      "Bash(python3 -c \"import json,sys; m=json.load\\(sys.stdin\\); print\\('chrome_url_overrides:', m.get\\('chrome_url_overrides', 'GONE'\\)\\); print\\('options_ui:', m.get\\('options_ui', 'GONE'\\)\\)\")",
+      "PowerShell($m = Get-Content \"c:\\\\My-Projects\\\\Vault-Chat-Exporter\\\\build\\\\chrome-mv3-prod\\\\manifest.json\" | ConvertFrom-Json; \"chrome_url_overrides: $\\(if \\($m.chrome_url_overrides\\) { $m.chrome_url_overrides } else { 'GONE' }\\)\"; \"options_ui: $\\(if \\($m.options_ui\\) { $m.options_ui } else { 'GONE' }\\)\")"
+    ]
+  }
+}
