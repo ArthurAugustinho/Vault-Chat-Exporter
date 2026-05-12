@@ -507,7 +507,8 @@ interface FolderNode {
 function buildFolderTree(folders: string[]): FolderNode[] {
   const map = new Map<string, FolderNode>()
   const roots: FolderNode[] = []
-  const sorted = [...folders].sort()
+  // localeCompare ensures parent paths sort before their children across all locales
+  const sorted = [...folders].sort((a, b) => a.localeCompare(b))
   for (const path of sorted) {
     const parts = path.split("/").filter(Boolean)
     if (parts.length === 0) continue
@@ -586,33 +587,34 @@ function FolderTreePicker({
     return (
       <div key={node.path}>
         <div
-          onClick={() => selectFolder(node.path)}
           onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
           onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
           style={{
-            display: "flex", alignItems: "center", gap: 4,
+            display: "flex", alignItems: "center",
             padding: `5px 10px 5px ${8 + depth * 14}px`,
-            cursor: "pointer", userSelect: "none",
+            userSelect: "none",
             background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
             borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
             transition: "background 0.1s"
           }}>
-          <button
+          {/* Expand/collapse zone: chevron + folder icon — 28px wide, easier to click */}
+          <div
             onClick={hasKids ? (e) => { e.stopPropagation(); toggleExpand(node.path) } : undefined}
-            style={{
-              width: 14, height: 14, flexShrink: 0,
-              color: C.muted, display: "flex", alignItems: "center", justifyContent: "center",
-              visibility: hasKids ? "visible" : "hidden"
-            }}>
-            <Ico name={isExp ? "chevron-down" : "chevron-right"} size={11} />
-          </button>
-          <span style={{ flexShrink: 0, color: isSel ? C.accent : C.muted, display: "flex" }}>
-            <Ico name="folder" size={13} />
-          </span>
-          <span style={{ fontSize: 12, color: isSel ? C.text : C.sub, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0, cursor: hasKids ? "pointer" : "default", paddingRight: 6 }}>
+            <span style={{ width: 12, height: 12, display: "flex", alignItems: "center", justifyContent: "center", color: C.muted, visibility: hasKids ? "visible" : "hidden" }}>
+              <Ico name={isExp ? "chevron-down" : "chevron-right"} size={11} />
+            </span>
+            <span style={{ color: isSel ? C.accent : C.muted, display: "flex" }}>
+              <Ico name="folder" size={13} />
+            </span>
+          </div>
+          {/* Folder name — clicking selects */}
+          <span
+            onClick={() => selectFolder(node.path)}
+            style={{ fontSize: 12, color: isSel ? C.text : C.sub, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>
             {node.name}
           </span>
-          {isSel && <span style={{ flexShrink: 0, color: C.accent, display: "flex" }}><Ico name="check" size={12} /></span>}
+          {isSel && <span style={{ flexShrink: 0, color: C.accent, display: "flex", marginLeft: 4 }}><Ico name="check" size={12} /></span>}
         </div>
         {isExp && hasKids && node.children.map(c => renderNode(c, depth + 1))}
       </div>
@@ -627,7 +629,7 @@ function FolderTreePicker({
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="AI Chats"
+          placeholder="Selecione ou digite o caminho da pasta"
           style={{ flex: 1, background: C.input, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: C.text }}
         />
         <button
@@ -647,9 +649,9 @@ function FolderTreePicker({
 
       {/* Tree panel (inline, toggleable) */}
       {open && (
-        <div style={{ background: C.input, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ background: C.input, border: `1px solid ${C.border}`, borderRadius: 10, display: "flex", flexDirection: "column", maxHeight: 260 }}>
           {/* Search + Refresh header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `1px solid ${C.divider}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `1px solid ${C.divider}`, flexShrink: 0 }}>
             <input
               ref={searchRef}
               type="text"
@@ -672,8 +674,8 @@ function FolderTreePicker({
             </button>
           </div>
 
-          {/* Content area */}
-          <div style={{ maxHeight: 200, overflowY: "auto" }}>
+          {/* Content area — flex: 1 + minHeight: 0 é o padrão correto para scroll dentro de flex */}
+          <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
             {loading && folders.length === 0 ? (
               <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>Loading folders…</div>
             ) : folders.length === 0 ? (
@@ -1015,6 +1017,7 @@ function Popup() {
   async function handleSync() {
     if (!settings || !conversation) return
     if (!settings.obsidianToken) { prevView.current = view; setView("settings"); return }
+    if (!folder.trim()) { setSyncStatus("error"); setSyncMsg("Informe uma pasta de destino antes de salvar."); return }
     if (selectedIds.size === 0) { setSyncStatus("error"); setSyncMsg("No messages selected."); return }
     setSyncStatus("syncing"); setSyncMsg("")
     try {

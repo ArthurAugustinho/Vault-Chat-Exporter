@@ -7,7 +7,7 @@ const SETTINGS_KEY = "vce_settings"
 const DEFAULTS: AppSettings = {
   obsidianBaseUrl: "http://127.0.0.1:27123",
   obsidianToken: "",
-  lastFolder: "AI Chats",
+  lastFolder: "",
   lastTags: "ai",
   lastMocPath: "",
   useMoc: false,
