@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import "~/style.css"
 
 import type { AppSettings, Conversation, ExtractRequest, ExtractResponse, Message } from "~/types"
@@ -193,6 +193,18 @@ function Ico({
         <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
           <path d="M13 3.5A6.5 6.5 0 108 14.5" />
           <path d="M13.5 1v3h-3" />
+        </svg>
+      )
+    case "chevron-right":
+      return (
+        <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
+          <path d="M6 12l4-4-4-4" />
+        </svg>
+      )
+    case "chevron-down":
+      return (
+        <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
+          <path d="M4 6l4 4 4-4" />
         </svg>
       )
     default:
@@ -484,51 +496,230 @@ function Banner({ type, children }: { type: "success" | "warning" | "error"; chi
 
 // ─── Vault sub-components ─────────────────────────────────────────────────────
 
-function FolderPicker({
+// ─── Folder Tree Picker ───────────────────────────────────────────────────────
+
+interface FolderNode {
+  name: string
+  path: string
+  children: FolderNode[]
+}
+
+function buildFolderTree(folders: string[]): FolderNode[] {
+  const map = new Map<string, FolderNode>()
+  const roots: FolderNode[] = []
+  const sorted = [...folders].sort()
+  for (const path of sorted) {
+    const parts = path.split("/").filter(Boolean)
+    if (parts.length === 0) continue
+    const node: FolderNode = { name: parts[parts.length - 1], path, children: [] }
+    map.set(path, node)
+    if (parts.length === 1) {
+      roots.push(node)
+    } else {
+      const parent = map.get(parts.slice(0, -1).join("/"))
+      if (parent) parent.children.push(node)
+      else roots.push(node)
+    }
+  }
+  return roots
+}
+
+function FolderTreePicker({
   value,
   onChange,
   folders,
-  loading
+  loading,
+  onRefresh
 }: {
   value: string
   onChange: (v: string) => void
   folders: string[]
   loading: boolean
+  onRefresh: () => void
 }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  const tree = useMemo(() => buildFolderTree(folders), [folders])
+
+  // Expand ancestors of current value so selection is visible in tree
+  useEffect(() => {
+    if (!value) return
+    const parts = value.split("/").filter(Boolean)
+    if (parts.length <= 1) return
+    setExpanded(prev => {
+      const next = new Set(prev)
+      for (let i = 0; i < parts.length - 1; i++) next.add(parts.slice(0, i + 1).join("/"))
+      return next
+    })
+  }, [value])
+
+  // Focus search on open; clear on close
+  useEffect(() => {
+    if (open) setTimeout(() => searchRef.current?.focus(), 50)
+    else setSearch("")
+  }, [open])
+
+  const lc = search.trim().toLowerCase()
+  const filtered = lc ? folders.filter(f => f.toLowerCase().includes(lc)) : null
+
+  function selectFolder(path: string) {
+    onChange(path)
+    setOpen(false)
+  }
+
+  function toggleExpand(path: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  function renderNode(node: FolderNode, depth: number) {
+    const isExp = expanded.has(node.path)
+    const isSel = value === node.path
+    const hasKids = node.children.length > 0
+    return (
+      <div key={node.path}>
+        <div
+          onClick={() => selectFolder(node.path)}
+          onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
+          style={{
+            display: "flex", alignItems: "center", gap: 4,
+            padding: `5px 10px 5px ${8 + depth * 14}px`,
+            cursor: "pointer", userSelect: "none",
+            background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
+            borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
+            transition: "background 0.1s"
+          }}>
+          <button
+            onClick={hasKids ? (e) => { e.stopPropagation(); toggleExpand(node.path) } : undefined}
+            style={{
+              width: 14, height: 14, flexShrink: 0,
+              color: C.muted, display: "flex", alignItems: "center", justifyContent: "center",
+              visibility: hasKids ? "visible" : "hidden"
+            }}>
+            <Ico name={isExp ? "chevron-down" : "chevron-right"} size={11} />
+          </button>
+          <span style={{ flexShrink: 0, color: isSel ? C.accent : C.muted, display: "flex" }}>
+            <Ico name="folder" size={13} />
+          </span>
+          <span style={{ fontSize: 12, color: isSel ? C.text : C.sub, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {node.name}
+          </span>
+          {isSel && <span style={{ flexShrink: 0, color: C.accent, display: "flex" }}><Ico name="check" size={12} /></span>}
+        </div>
+        {isExp && hasKids && node.children.map(c => renderNode(c, depth + 1))}
+      </div>
+    )
+  }
+
   return (
-    <div style={{ position: "relative" }}>
-      <input
-        type="text"
-        list="vce-folders"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="AI Chats"
-        style={{
-          width: "100%",
-          background: C.input,
-          border: `1px solid ${C.border}`,
-          borderRadius: 8,
-          padding: "8px 34px 8px 12px",
-          fontSize: 13,
-          color: C.text
-        }}
-      />
-      <datalist id="vce-folders">
-        {folders.map((f) => <option key={f} value={f} />)}
-      </datalist>
-      <span style={{
-        position: "absolute",
-        right: 10,
-        top: "50%",
-        transform: "translateY(-50%)",
-        color: loading ? C.sub : C.muted,
-        display: "flex",
-        alignItems: "center"
-      }}>
-        {loading
-          ? <span style={{ fontSize: 14, animation: "spin 1s linear infinite" }}>⟳</span>
-          : <Ico name="folder" size={14} />}
-      </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Manual input + toggle */}
+      <div style={{ display: "flex", gap: 6 }}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="AI Chats"
+          style={{ flex: 1, background: C.input, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: C.text }}
+        />
+        <button
+          onClick={() => setOpen(o => !o)}
+          title={open ? "Close folder browser" : "Browse folders"}
+          style={{
+            width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+            background: open ? "rgba(124,58,237,0.2)" : C.input,
+            border: `1px solid ${open ? C.accent : C.border}`,
+            color: open ? C.accent : C.muted,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "background 0.15s, border-color 0.15s, color 0.15s"
+          }}>
+          <Ico name="folder" size={15} />
+        </button>
+      </div>
+
+      {/* Tree panel (inline, toggleable) */}
+      {open && (
+        <div style={{ background: C.input, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+          {/* Search + Refresh header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `1px solid ${C.divider}` }}>
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search folders…"
+              style={{ flex: 1, background: "transparent", fontSize: 12, color: C.text }}
+            />
+            {search && (
+              <button onClick={() => setSearch("")} style={{ color: C.muted, display: "flex" }}>
+                <Ico name="x-circle" size={13} />
+              </button>
+            )}
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              title="Refresh folders from Obsidian"
+              style={{ color: loading ? C.muted : C.sub, display: "flex", opacity: loading ? 0.5 : 1, transition: "opacity 0.15s" }}>
+              <Ico name="refresh" size={13} />
+            </button>
+          </div>
+
+          {/* Content area */}
+          <div style={{ maxHeight: 200, overflowY: "auto" }}>
+            {loading && folders.length === 0 ? (
+              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>Loading folders…</div>
+            ) : folders.length === 0 ? (
+              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+                No folders found. Is Obsidian open?
+              </div>
+            ) : filtered !== null ? (
+              filtered.length === 0 ? (
+                <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+                  No match for "{search}"
+                </div>
+              ) : (
+                filtered.map(path => {
+                  const name = path.split("/").pop() ?? path
+                  const isSel = value === path
+                  return (
+                    <div
+                      key={path}
+                      onClick={() => selectFolder(path)}
+                      onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "6px 12px", cursor: "pointer", userSelect: "none",
+                        background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
+                        borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
+                        transition: "background 0.1s"
+                      }}>
+                      <span style={{ color: isSel ? C.accent : C.muted, display: "flex", flexShrink: 0 }}>
+                        <Ico name="folder" size={13} />
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                        <div style={{ fontSize: 10, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</div>
+                      </div>
+                      {isSel && <span style={{ color: C.accent, display: "flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
+                    </div>
+                  )
+                })
+              )
+            ) : (
+              tree.map(node => renderNode(node, 0))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -990,20 +1181,24 @@ function Popup() {
                 <FieldGroup label="Title">
                   <TextInput value={title} onChange={setTitle} placeholder="Conversation title" />
                 </FieldGroup>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <FieldGroup label="Folder" hint="Vault-relative path">
-                    <FolderPicker value={folder} onChange={setFolder} folders={folders} loading={vaultLoading && folders.length === 0} />
-                  </FieldGroup>
-                  <FieldGroup label="Template">
-                    <select
-                      value={template}
-                      onChange={(e) => setTemplate(e.target.value)}
-                      style={{ width: "100%", background: C.input, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: C.text }}>
-                      <option value="">None</option>
-                      {TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                    </select>
-                  </FieldGroup>
-                </div>
+                <FieldGroup label="Folder" hint="Vault-relative path">
+                  <FolderTreePicker
+                    value={folder}
+                    onChange={setFolder}
+                    folders={folders}
+                    loading={vaultLoading}
+                    onRefresh={() => settings && void loadVaultData(settings, true)}
+                  />
+                </FieldGroup>
+                <FieldGroup label="Template">
+                  <select
+                    value={template}
+                    onChange={(e) => setTemplate(e.target.value)}
+                    style={{ width: "100%", background: C.input, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: C.text }}>
+                    <option value="">None</option>
+                    {TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                </FieldGroup>
                 <FieldGroup label="Tags">
                   <TagInput value={tags} onChange={setTags} suggestions={knownTags} />
                 </FieldGroup>
