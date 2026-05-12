@@ -36,19 +36,75 @@ async function fetchVaultFiles(opts: VaultListOpts): Promise<string[]> {
 // ─── Vault Listing ────────────────────────────────────────────────────────────
 
 /**
- * GET /vault/ — derives unique folder paths from the vault file list.
+ * GET /vault/{dirPath}/ — list the contents of a single directory.
+ * Returns [] on any non-auth error so the recursive scan can keep going.
+ */
+async function fetchDirEntries(opts: VaultListOpts, dirPath: string): Promise<string[]> {
+  const urlPath = dirPath
+    ? `vault/${encodePath(dirPath)}/`
+    : "vault/"
+  let res: Response
+  try {
+    res = await fetch(vaultUrl(opts.baseUrl, urlPath), {
+      headers: { Authorization: `Bearer ${opts.token}` }
+    })
+  } catch {
+    return []
+  }
+  if (res.status === 401) throw new Error("Invalid API token.")
+  if (!res.ok) return []
+  const data = (await res.json()) as { files?: string[] }
+  return data.files ?? []
+}
+
+/**
+ * GET /vault/ — returns all folder paths in the vault, including deep subfolders.
+ *
+ * Strategy: the Obsidian Local REST API returns only the current directory level
+ * (not recursive). Entries ending with "/" are subfolders. We perform a BFS scan,
+ * fetching each discovered subfolder until no new directories are found.
+ * Entries without a trailing "/" are files; ancestor folders are derived from
+ * their paths (handles vaults where the API returns recursive file lists instead).
  */
 export async function listFolders(opts: VaultListOpts): Promise<string[]> {
-  const files = await fetchVaultFiles(opts)
-  const folders = new Set<string>()
-  for (const file of files) {
-    const clean = file.endsWith("/") ? file.slice(0, -1) : file
-    const parts = clean.split("/").filter(Boolean)
-    for (let i = 0; i < parts.length - (file.endsWith("/") ? 0 : 1); i++) {
-      folders.add(parts.slice(0, i + 1).join("/"))
+  const folderSet = new Set<string>()
+  const visited = new Set<string>()
+  const queue: string[] = [""] // start from vault root
+
+  while (queue.length > 0) {
+    const dirPath = queue.shift()!
+    if (visited.has(dirPath)) continue
+    visited.add(dirPath)
+    if (dirPath.split("/").filter(Boolean).length >= 8) continue // depth guard
+
+    const entries = await fetchDirEntries(opts, dirPath)
+
+    for (const entry of entries) {
+      if (entry.endsWith("/")) {
+        // Directory entry — build full path and enqueue for scanning
+        const name = entry.slice(0, -1)
+        if (!name) continue
+        const fullPath = dirPath ? `${dirPath}/${name}` : name
+        if (!folderSet.has(fullPath)) {
+          folderSet.add(fullPath)
+          queue.push(fullPath)
+        }
+      } else {
+        // File entry — derive ancestor folder paths (handles recursive API responses)
+        const filePath = dirPath ? `${dirPath}/${entry}` : entry
+        const parts = filePath.split("/").filter(Boolean)
+        for (let i = 0; i < parts.length - 1; i++) {
+          const ancestorPath = parts.slice(0, i + 1).join("/")
+          if (!folderSet.has(ancestorPath)) {
+            folderSet.add(ancestorPath)
+            queue.push(ancestorPath)
+          }
+        }
+      }
     }
   }
-  return Array.from(folders).sort((a, b) => a.localeCompare(b))
+
+  return Array.from(folderSet).sort((a, b) => a.localeCompare(b))
 }
 
 /**
