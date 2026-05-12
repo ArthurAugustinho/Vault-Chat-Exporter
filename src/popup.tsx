@@ -195,18 +195,6 @@ function Ico({
           <path d="M13.5 1v3h-3" />
         </svg>
       )
-    case "chevron-right":
-      return (
-        <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
-          <path d="M6 12l4-4-4-4" />
-        </svg>
-      )
-    case "chevron-down":
-      return (
-        <svg style={s} viewBox="0 0 16 16" {...stroke} className={className}>
-          <path d="M4 6l4 4 4-4" />
-        </svg>
-      )
     default:
       return null
   }
@@ -496,103 +484,9 @@ function Banner({ type, children }: { type: "success" | "warning" | "error"; chi
 
 // ─── Vault sub-components ─────────────────────────────────────────────────────
 
-// ─── Folder Tree Picker ───────────────────────────────────────────────────────
+// ─── Folder Dropdown (searchable combobox, flat list) ─────────────────────────
 
-interface FolderNode {
-  name: string
-  path: string
-  children: FolderNode[]
-}
-
-// Converts a flat sorted list of folder paths into a nested tree.
-// Relies on alphabetical sort guaranteeing parent before child:
-//   "A/B" always sorts after "A" since "/" (U+002F) < any letter.
-function buildFolderTree(folders: string[]): FolderNode[] {
-  const map = new Map<string, FolderNode>()
-  const roots: FolderNode[] = []
-  const sorted = [...folders].sort((a, b) => a.localeCompare(b))
-  for (const path of sorted) {
-    const parts = path.split("/").filter(Boolean)
-    if (parts.length === 0) continue
-    const node: FolderNode = { name: parts[parts.length - 1], path, children: [] }
-    map.set(path, node)
-    if (parts.length === 1) {
-      roots.push(node)
-    } else {
-      const parent = map.get(parts.slice(0, -1).join("/"))
-      if (parent) parent.children.push(node)
-      else roots.push(node) // orphan: intermediate path missing from API response
-    }
-  }
-  return roots
-}
-
-// Proper React component so React can reconcile expand state correctly.
-// Using a function (not a component) caused React to miss re-renders on expand toggle.
-function TreeNode({
-  node, depth, value, expanded, onSelect, onToggle
-}: {
-  node: FolderNode
-  depth: number
-  value: string
-  expanded: Set<string>
-  onSelect: (path: string) => void
-  onToggle: (path: string) => void
-}) {
-  const isExp = expanded.has(node.path)
-  const isSel = value === node.path
-  const hasKids = node.children.length > 0
-  return (
-    <div>
-      <div
-        onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
-        style={{
-          display: "flex", alignItems: "center",
-          paddingLeft: 6 + depth * 16, paddingRight: 10,
-          paddingTop: 5, paddingBottom: 5,
-          background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
-          borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent",
-          userSelect: "none"
-        }}>
-        {/* Expand/collapse — 20×20 zone, easier to hit than 14×14 */}
-        <span
-          onClick={() => { if (hasKids) onToggle(node.path) }}
-          style={{
-            width: 20, height: 20,
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0, cursor: hasKids ? "pointer" : "default", color: C.muted
-          }}>
-          {hasKids && <Ico name={isExp ? "chevron-down" : "chevron-right"} size={12} />}
-        </span>
-        {/* Folder icon */}
-        <span style={{ display: "inline-flex", color: isSel ? C.accent : C.muted, marginRight: 6, flexShrink: 0 }}>
-          <Ico name="folder" size={13} />
-        </span>
-        {/* Name — click selects this folder */}
-        <span
-          onClick={() => onSelect(node.path)}
-          style={{ flex: 1, fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}>
-          {node.name}
-        </span>
-        {isSel && <span style={{ flexShrink: 0, color: C.accent, display: "inline-flex" }}><Ico name="check" size={12} /></span>}
-      </div>
-      {isExp && hasKids && node.children.map(child => (
-        <TreeNode
-          key={child.path}
-          node={child}
-          depth={depth + 1}
-          value={value}
-          expanded={expanded}
-          onSelect={onSelect}
-          onToggle={onToggle}
-        />
-      ))}
-    </div>
-  )
-}
-
-function FolderTreePicker({
+function FolderDropdown({
   value,
   onChange,
   folders,
@@ -606,157 +500,94 @@ function FolderTreePicker({
   onRefresh: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const searchRef = useRef<HTMLInputElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
-  const tree = useMemo(() => buildFolderTree(folders), [folders])
-
-  // Auto-expand ancestors when a saved value is loaded
-  useEffect(() => {
-    if (!value) return
-    const parts = value.split("/").filter(Boolean)
-    if (parts.length <= 1) return
-    setExpanded(prev => {
-      const next = new Set(prev)
-      for (let i = 0; i < parts.length - 1; i++) next.add(parts.slice(0, i + 1).join("/"))
-      return next
-    })
-  }, [value])
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase()
+    if (!q) return folders
+    return folders.filter((f) => f.toLowerCase().includes(q))
+  }, [folders, value])
 
   useEffect(() => {
-    if (open) setTimeout(() => searchRef.current?.focus(), 50)
-    else setSearch("")
+    if (!open) return
+    function handle(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", handle)
+    return () => document.removeEventListener("mousedown", handle)
   }, [open])
-
-  const lc = search.trim().toLowerCase()
-  const filtered = lc ? folders.filter(f => f.toLowerCase().includes(lc)) : null
 
   function selectFolder(path: string) {
     onChange(path)
     setOpen(false)
   }
 
-  function toggleExpand(path: string) {
-    setExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
-  }
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {/* Manual input + open/close button */}
+    <div ref={rootRef} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", gap: 6 }}>
         <input
           type="text"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => { onChange(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
           placeholder="Selecione ou digite o caminho da pasta"
           style={{ flex: 1, background: C.input, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, color: C.text }}
         />
         <button
-          onClick={() => setOpen(o => !o)}
-          title={open ? "Fechar navegador de pastas" : "Navegar pastas"}
+          onClick={onRefresh}
+          disabled={loading}
+          title="Atualizar lista de pastas"
           style={{
             width: 34, height: 34, borderRadius: 8, flexShrink: 0,
-            background: open ? "rgba(124,58,237,0.2)" : C.input,
-            border: `1px solid ${open ? C.accent : C.border}`,
-            color: open ? C.accent : C.muted,
+            background: C.input, border: `1px solid ${C.border}`,
+            color: loading ? C.muted : C.sub,
             display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "background 0.15s, border-color 0.15s, color 0.15s"
+            opacity: loading ? 0.5 : 1, transition: "color 0.15s"
           }}>
-          <Ico name="folder" size={15} />
+          <Ico name="refresh" size={14} />
         </button>
       </div>
 
-      {/* Tree panel */}
       {open && (
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, background: C.input }}>
-          {/* Search + Refresh header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: `1px solid ${C.divider}` }}>
-            <input
-              ref={searchRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar pastas…"
-              style={{ flex: 1, background: "transparent", fontSize: 12, color: C.text }}
-            />
-            {search && (
-              <button onClick={() => setSearch("")} style={{ color: C.muted, display: "flex" }}>
-                <Ico name="x-circle" size={13} />
-              </button>
-            )}
-            <button
-              onClick={onRefresh}
-              disabled={loading}
-              title="Atualizar lista de pastas"
-              style={{ color: loading ? C.muted : C.sub, display: "flex", opacity: loading ? 0.5 : 1 }}>
-              <Ico name="refresh" size={13} />
-            </button>
-          </div>
-
-          {/* Scrollable content — maxHeight directly on this div, no flex/overflow:hidden above */}
-          <div style={{ maxHeight: 240, overflowY: "auto" }}>
-            {loading && folders.length === 0 ? (
-              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-                Carregando pastas…
-              </div>
-            ) : folders.length === 0 ? (
-              <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-                Nenhuma pasta encontrada. O Obsidian está aberto?
-              </div>
-            ) : filtered !== null ? (
-              filtered.length === 0 ? (
-                <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
-                  Nenhuma pasta encontrada para "{search}"
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, background: C.input, maxHeight: 240, overflowY: "auto" }}>
+          {loading && folders.length === 0 ? (
+            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+              Carregando pastas…
+            </div>
+          ) : folders.length === 0 ? (
+            <div style={{ padding: 14, textAlign: "center", fontSize: 12, color: C.muted }}>
+              Nenhuma pasta encontrada. O Obsidian está aberto?
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: "10px 12px", fontSize: 12, color: C.muted }}>
+              Pasta não encontrada — o valor digitado será usado diretamente.
+            </div>
+          ) : (
+            filtered.map((path) => {
+              const isSel = value === path
+              return (
+                <div
+                  key={path}
+                  onMouseDown={(e) => { e.preventDefault(); selectFolder(path) }}
+                  onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "7px 12px", cursor: "pointer", userSelect: "none",
+                    background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
+                    borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent"
+                  }}>
+                  <span style={{ color: isSel ? C.accent : C.muted, display: "inline-flex", flexShrink: 0 }}>
+                    <Ico name="folder" size={13} />
+                  </span>
+                  <span style={{ flex: 1, fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {path}
+                  </span>
+                  {isSel && <span style={{ color: C.accent, display: "inline-flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
                 </div>
-              ) : (
-                filtered.map(path => {
-                  const name = path.split("/").pop() ?? path
-                  const isSel = value === path
-                  return (
-                    <div
-                      key={path}
-                      onClick={() => selectFolder(path)}
-                      onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.05)" }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = isSel ? "rgba(124,58,237,0.15)" : "transparent" }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "6px 12px", cursor: "pointer", userSelect: "none",
-                        background: isSel ? "rgba(124,58,237,0.15)" : "transparent",
-                        borderLeft: isSel ? `2px solid ${C.accent}` : "2px solid transparent"
-                      }}>
-                      <span style={{ color: isSel ? C.accent : C.muted, display: "inline-flex", flexShrink: 0 }}>
-                        <Ico name="folder" size={13} />
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, color: isSel ? C.text : C.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
-                        <div style={{ fontSize: 10, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path}</div>
-                      </div>
-                      {isSel && <span style={{ color: C.accent, display: "inline-flex", flexShrink: 0 }}><Ico name="check" size={12} /></span>}
-                    </div>
-                  )
-                })
               )
-            ) : (
-              // Tree mode: use TreeNode component so React reconciles expand state correctly
-              tree.map(node => (
-                <TreeNode
-                  key={node.path}
-                  node={node}
-                  depth={0}
-                  value={value}
-                  expanded={expanded}
-                  onSelect={selectFolder}
-                  onToggle={toggleExpand}
-                />
-              ))
-            )}
-          </div>
+            })
+          )}
         </div>
       )}
     </div>
@@ -1222,7 +1053,7 @@ function Popup() {
                   <TextInput value={title} onChange={setTitle} placeholder="Conversation title" />
                 </FieldGroup>
                 <FieldGroup label="Folder" hint="Vault-relative path">
-                  <FolderTreePicker
+                  <FolderDropdown
                     value={folder}
                     onChange={setFolder}
                     folders={folders}
